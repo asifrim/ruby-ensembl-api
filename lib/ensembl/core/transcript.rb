@@ -102,7 +102,9 @@ module Ensembl
       # *Returns*:: sorted array of Exon objects
       def exons
         if @exons.nil?
-          @exons = self.exon_transcripts.sort_by{|et| et.rank.to_i}.collect{|et| et.exon}
+           lol = []
+           lol = ExonTranscript.find(:all, :conditions => "transcript_id = 173218", :order => "rank").collect{|et| et.exon_id}
+           @exons = Exon.find(lol)
         end
         return @exons
       end
@@ -344,8 +346,27 @@ module Ensembl
         accumulated_position = 0
         self.exons.each do |exon|
           if exon == exon_with_target
-            answer = exon.start + ( pos - accumulated_position )
+    # Example:
+    # --------
+    # Given position:                              *
+    # CDNA Forward:     1  2   3   4   5   6   7   8   9   10  11  12  13 14
+    # CDNA Reverse:     14 13  12  11  10  9   8   7   6   5   4   3   2  1
+    # Genomic:          10 11  12  13  14  15  16  17  18  19  20  21  22 23
+    # Forward: Exon:    1  1   1   1   2   2   2   2   2   3  3    3   3  3
+    # Reverse: Exon:    3  3   3   3   2   2   2   2   2   1  1    1   1  1
+    # In the forward example we get:
+    #  14 + 8 - 4 - 1 = 17
+    # In the reverse example this doesn't work as we get:
+    #  14 + 7 - 5 - 1 = 15
+    # Therefore we must count the distance from the exon genomic end instead
+    #  18 - (7 - 5 - 1) = 17 => Bingo!
+            if self.seq_region_strand == 1
+            answer = exon.start + ( pos - accumulated_position - 1)
             return answer
+            else
+            answer = exon.seq_region_end - (pos - accumulated_position - 1)
+            return answer
+            end
           else
             accumulated_position += exon.length
           end
@@ -360,7 +381,7 @@ module Ensembl
       # * pos:: position on the CDS (required)
       # *Returns*:: 
       def cds2genomic(pos)
-        return self.cdna2genomic(pos + self.coding_region_cdna_start)
+        return self.cdna2genomic(pos + self.coding_region_cdna_start - 1)
       end
       
       # = DESCRIPTION
@@ -389,7 +410,11 @@ module Ensembl
         accumulated_position = 0
         self.exons.each do |exon|
           if exon == exon_with_target
-            accumulated_position += ( pos - exon.start )
+            if exon.seq_region_strand == 1
+            accumulated_position += ( pos - exon.start + 1 )
+            else
+              accumulated_position += ( exon.seq_region_end - pos + 1)
+            end
             return accumulated_position
           else
             accumulated_position += exon.length
@@ -406,7 +431,7 @@ module Ensembl
       # * pos:: position on the chromosome (required)
       # *Returns*:: 
       def genomic2cds(pos)
-        return self.genomic2cdna(pos) - self.coding_region_cdna_start
+        return self.genomic2cdna(pos) - self.coding_region_cdna_start + 1
       end
 
       # = DESCRIPTION
@@ -416,8 +441,8 @@ module Ensembl
       # *Arguments*:
       # * pos:: position on the chromosome (required)
       # *Returns*:: 
-      def genomic2pep(pos)
-        raise NotImplementedError
+      def cds2pep(pos)
+        return (pos - 1)/3 + 1
       end
 
     end
