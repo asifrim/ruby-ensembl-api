@@ -54,7 +54,12 @@ module Ensembl
       end
 
     end
-    
+    #Table with the precomputed CDS sequences.
+    class TranscriptSequence < DBConnection
+      belongs_to :transcript
+      set_table_name 'transcript_sequence'
+      set_primary_key 'transcript_id'
+    end
     # = DESCRIPTION
     # The Transcript class provides an interface to the transcript
     # table. This table contains mappings of transcripts for a Gene to a
@@ -80,7 +85,7 @@ module Ensembl
       belongs_to :seq_region
       has_one :transcript_stable_id
       has_many :transcript_attribs
-      
+      has_one :transcript_sequence
       has_many :exon_transcripts
       has_many :exons, :through => :exon_transcripts
 
@@ -102,9 +107,7 @@ module Ensembl
       # *Returns*:: sorted array of Exon objects
       def exons
         if @exons.nil?
-           lol = []
-           lol = ExonTranscript.find(:all, :conditions => "transcript_id = 173218", :order => "rank").collect{|et| et.exon_id}
-           @exons = Exon.find(lol)
+          @exons = self.exon_transcripts.sort_by{|et| et.rank.to_i}.collect{|et| et.exon}
         end
         return @exons
       end
@@ -203,7 +206,16 @@ module Ensembl
         
         return self.seq[(self.coding_region_cdna_start - 1), cds_length]
       end
-      
+      def precomputecds_seq
+        begin
+          self.transcript_sequence = TranscriptSequence.new
+          self.transcript_sequence.cds_seq = self.cds_seq
+
+        rescue NotImplementedError
+          self.transcript_sequence.cds_seq = ""
+        end
+        self.transcript_sequence.save
+      end
       # = DESCRIPTION
       # The Transcript#five_prime_utr_seq method returns the sequence of the
       # 5'UTR of the transcript.
@@ -304,9 +316,9 @@ module Ensembl
       # The Transcript#exon_for_position identifies the exon that covers a given
       # genomic position. Returns the exon object, or nil if in intron.
       def exon_for_genomic_position(pos)
-#        if pos < coding_region_genomic_start or pos > coding_region_genomic_end
-#          raise RuntimeError, "Position has to be within transcript"
-#        end
+        #        if pos < coding_region_genomic_start or pos > coding_region_genomic_end
+        #          raise RuntimeError, "Position has to be within transcript"
+        #        end
         self.exons.each do |exon|
           if exon.start <= pos and exon.stop >= pos
             return exon
@@ -346,26 +358,26 @@ module Ensembl
         accumulated_position = 0
         self.exons.each do |exon|
           if exon == exon_with_target
-    # Example:
-    # --------
-    # Given position:                              *
-    # CDNA Forward:     1  2   3   4   5   6   7   8   9   10  11  12  13 14
-    # CDNA Reverse:     14 13  12  11  10  9   8   7   6   5   4   3   2  1
-    # Genomic:          10 11  12  13  14  15  16  17  18  19  20  21  22 23
-    # Forward: Exon:    1  1   1   1   2   2   2   2   2   3  3    3   3  3
-    # Reverse: Exon:    3  3   3   3   2   2   2   2   2   1  1    1   1  1
-    # In the forward example we get:
-    #  14 + 8 - 4 - 1 = 17
-    # In the reverse example this doesn't work as we get:
-    #  14 + 7 - 5 - 1 = 15
-    # Therefore we must count the distance from the exon genomic end instead
-    #  18 - (7 - 5 - 1) = 17 => Bingo!
+            # Example:
+            # --------
+            # Given position:                              *
+            # CDNA Forward:     1  2   3   4   5   6   7   8   9   10  11  12  13 14
+            # CDNA Reverse:     14 13  12  11  10  9   8   7   6   5   4   3   2  1
+            # Genomic:          10 11  12  13  14  15  16  17  18  19  20  21  22 23
+            # Forward: Exon:    1  1   1   1   2   2   2   2   2   3  3    3   3  3
+            # Reverse: Exon:    3  3   3   3   2   2   2   2   2   1  1    1   1  1
+            # In the forward example we get:
+            #  14 + 8 - 4 - 1 = 17
+            # In the reverse example this doesn't work as we get:
+            #  14 + 7 - 5 - 1 = 15
+            # Therefore we must count the distance from the exon genomic end instead
+            #  18 - (7 - 5 - 1) = 17 => Bingo!
             if self.seq_region_strand == 1
-            answer = exon.start + ( pos - accumulated_position - 1)
-            return answer
+              answer = exon.start + ( pos - accumulated_position - 1)
+              return answer
             else
-            answer = exon.seq_region_end - (pos - accumulated_position - 1)
-            return answer
+              answer = exon.seq_region_end - (pos - accumulated_position - 1)
+              return answer
             end
           else
             accumulated_position += exon.length
@@ -411,7 +423,7 @@ module Ensembl
         self.exons.each do |exon|
           if exon == exon_with_target
             if exon.seq_region_strand == 1
-            accumulated_position += ( pos - exon.start + 1 )
+              accumulated_position += ( pos - exon.start + 1 )
             else
               accumulated_position += ( exon.seq_region_end - pos + 1)
             end
