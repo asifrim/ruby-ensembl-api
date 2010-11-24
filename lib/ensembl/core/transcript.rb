@@ -107,7 +107,7 @@ module Ensembl
       # *Returns*:: sorted array of Exon objects
       def exons
         if @exons.nil?
-          @exons = self.exon_transcripts.sort_by{|et| et.rank.to_i}.collect{|et| et.exon}
+          @exons = self.exon_transcripts(:include => [:exons]).sort_by{|et| et.rank.to_i}.collect{|et| et.exon}
         end
         return @exons
       end
